@@ -1,7 +1,8 @@
-discord.py==2.6.3
-PyNaCl==1.5.0
-yt-dlp==2025.9.13
-spotipy==2.26.0
-requests==2.31.0
-imageio==2.31.3
-imageio-ffmpeg==0.4.10
+# requirements.txt
+
+discord.py==2.6.3           # Última versão estável compatível
+PyNaCl==1.5.0               # Necessário para voz
+yt-dlp==2025.9.4             # Última versão do YouTube DL
+spotipy==2.27.0             # Spotify API
+requests==2.31.0            # Requerido pelo spotipy
+imageio-ffmpeg==0.6.0       # FFmpeg interno

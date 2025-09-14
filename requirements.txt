@@ -1,6 +1,13 @@
+# Discord bot
 discord.py==2.6.3
-yt-dlp==2025.9.13
+
+# YouTube downloader (última versão diretamente do GitHub)
+git+https://github.com/yt-dlp/yt-dlp.git
+
+# Spotify API
 spotipy==2.25.1
+
+# Ambiente
 python-dotenv==1.0.1
 aiohttp==3.9.4
 requests==2.31.0

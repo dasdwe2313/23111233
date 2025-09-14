@@ -11,4 +11,5 @@ spotipy==2.25.1
 python-dotenv==1.0.1
 aiohttp==3.9.4
 requests==2.31.0
-imageio-ffmpeg==2025.4.0
+imageio-ffmpeg==0.6.0
+

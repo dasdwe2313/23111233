@@ -1,5 +1,12 @@
-# ===== Imagem base =====
+# ===== Base =====
 FROM python:3.11-slim
+
+# ===== Variáveis de ambiente =====
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# ===== Diretório de trabalho =====
+WORKDIR /app
 
 # ===== Instalar dependências do sistema =====
 RUN apt-get update && apt-get install -y \
@@ -7,24 +14,12 @@ RUN apt-get update && apt-get install -y \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-# ===== Criar diretório do bot =====
-WORKDIR /app
-
 # ===== Copiar arquivos =====
-COPY requirements.txt .
-COPY bot.py .
+COPY . /app
 
-# ===== Instalar dependências Python =====
+# ===== Atualizar pip e instalar dependências Python =====
 RUN pip install --upgrade pip
-RUN pip install -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
-# ===== Variáveis de ambiente =====
-# No Railway você define pelo painel, mas podemos deixar exemplo:
-# ENV DISCORD_TOKEN=OTA0MDY2MTc2MDk3ODQ5NDM0.GuSI43.brM8ArOyPI5lAmXw0wWNuoo8j-actmX6GT00_s
-# ENV SPOTIPY_CLIENT_ID=dba006a65be04444aa7e47f445cf27ca
-# ENV SPOTIPY_CLIENT_SECRET=54d00fbdf26f44149f3d2ec0f08473bb
-# ENV SPOTIPY_REDIRECT_URI=https://localhost:8882338/callback12323
-
-# ===== Rodar o bot =====
+# ===== Comando para rodar o bot =====
 CMD ["python", "bot.py"]
-

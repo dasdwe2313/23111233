@@ -1,111 +1,146 @@
 import discord
 from discord.ext import commands
 import asyncio
-import yt_dlp as ytdlp
+import os
+from dotenv import load_dotenv
+import yt_dlp
+import spotipy
+from spotipy.oauth2 import SpotifyClientCredentials
+
+# ======= Configurações =======
+VERSION = "1.1"
+AUTHOR = "Kennedy"
+
+load_dotenv()
+TOKEN = os.getenv("DISCORD_TOKEN")
+SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID")
+SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET")
+
+sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials(
+    client_id=SPOTIFY_CLIENT_ID,
+    client_secret=SPOTIFY_CLIENT_SECRET
+))
 
 intents = discord.Intents.default()
 intents.message_content = True
-intents.voice_states = True
-
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-queues = {}  # Fila por guilda
+queues = {}
 
-YTDLP_OPTIONS = {
-    "format": "bestaudio/best",
-    "noplaylist": True,
-    "quiet": True,
-    "default_search": "ytsearch1",  # Busca pelo nome
-}
+# ======= Função tocar música =======
+async def play_music(ctx, search):
+    guild_id = ctx.guild.id
+    if guild_id not in queues:
+        queues[guild_id] = []
 
-FFMPEG_OPTIONS = {
-    "before_options": "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
-    "options": "-vn",
-}
+    try:
+        results = sp.search(q=search, type="track", limit=1)
+        track = results['tracks']['items'][0]
+        url = track['external_urls']['spotify']
+        title = f"{track['name']} - {track['artists'][0]['name']}"
+    except:
+        ydl_opts = {'format': 'bestaudio', 'noplaylist': True}
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(f"ytsearch:{search}", download=False)['entries'][0]
+            url = info['webpage_url']
+            title = info['title']
 
-# ---------------- FUNÇÕES ----------------
-async def search_youtube(query):
-    with ytdlp.YoutubeDL(YTDLP_OPTIONS) as ydl:
-        info = ydl.extract_info(query, download=False)
-        return info["entries"][0]["url"] if "entries" in info else info["url"]
+    queues[guild_id].append({'title': title, 'url': url})
 
-async def play_next(ctx):
-    queue = queues.get(ctx.guild.id)
-    if queue and len(queue) > 0:
-        url = queue.pop(0)
-        ctx.voice_client.play(
-            discord.FFmpegPCMAudio(url, **FFMPEG_OPTIONS),
-            after=lambda e: asyncio.run_coroutine_threadsafe(play_next(ctx), bot.loop)
-        )
-    else:
-        await ctx.voice_client.disconnect()
-
-# ---------------- COMANDOS ----------------
-@bot.command()
-async def join(ctx):
-    if ctx.author.voice:
+    if not ctx.voice_client or not ctx.voice_client.is_playing():
+        if not ctx.author.voice:
+            await ctx.send("❌ Você precisa estar em um canal de voz!")
+            return
         channel = ctx.author.voice.channel
-        if ctx.voice_client is None:
-            await channel.connect()
-            await ctx.send(f"Conectado ao canal {channel}")
-        else:
-            await ctx.send("Já estou conectado a um canal de voz.")
+        vc = await channel.connect()
+        await start_queue(ctx)
     else:
-        await ctx.send("Você precisa estar em um canal de voz!")
+        await ctx.send(f"➕ **Adicionado à fila:** {title}")
+
+# ======= Função fila =======
+async def start_queue(ctx):
+    guild_id = ctx.guild.id
+    vc = ctx.voice_client
+
+    while queues[guild_id]:
+        track = queues[guild_id].pop(0)
+        ydl_opts = {'format': 'bestaudio'}
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(track['url'], download=False)
+            url2 = info['url']
+
+        vc.play(discord.FFmpegPCMAudio(url2, executable="ffmpeg"), after=lambda e: print(f'Erro: {e}') if e else None)
+
+        embed = discord.Embed(
+            title=f"🎶 Tocando agora: {track['title']}",
+            description=f"💡 **Bot versão:** {VERSION}\n👤 **Criador:** {AUTHOR}",
+            color=discord.Color.green()
+        )
+        embed.set_footer(text="🎧 Bot Music by Kennedy")
+        await ctx.send(embed=embed)
+
+        while vc.is_playing():
+            await asyncio.sleep(1)
+
+    await vc.disconnect()
+
+# ======= Comandos =======
+@bot.command()
+async def play(ctx, *, search: str):
+    await play_music(ctx, search)
 
 @bot.command()
-async def leave(ctx):
-    if ctx.voice_client:
-        await ctx.voice_client.disconnect()
-        queues[ctx.guild.id] = []
-        await ctx.send("Desconectado e fila limpa.")
+async def pause(ctx):
+    if ctx.voice_client.is_playing():
+        ctx.voice_client.pause()
+        await ctx.send("⏸️ Música pausada!")
     else:
-        await ctx.send("Não estou em nenhum canal!")
+        await ctx.send("❌ Nenhuma música tocando!")
 
 @bot.command()
-async def play(ctx, *, query):
-    if ctx.author.voice is None:
-        await ctx.send("Você precisa estar em um canal de voz!")
-        return
-
-    # Conecta se não estiver conectado
-    if ctx.voice_client is None:
-        await ctx.author.voice.channel.connect()
-
-    # Adiciona música à fila
-    url = await search_youtube(query)
-    queue = queues.setdefault(ctx.guild.id, [])
-    queue.append(url)
-
-    # Toca se não estiver tocando
-    if not ctx.voice_client.is_playing():
-        await ctx.send(f"Tocando: {query}")
-        url = queue.pop(0)
-        ctx.voice_client.play(discord.FFmpegPCMAudio(url, **FFMPEG_OPTIONS), after=lambda e: asyncio.run_coroutine_threadsafe(play_next(ctx), bot.loop))
+async def resume(ctx):
+    if ctx.voice_client.is_paused():
+        ctx.voice_client.resume()
+        await ctx.send("▶️ Música retomada!")
     else:
-        await ctx.send(f"Adicionado à fila: {query}")
+        await ctx.send("❌ Nenhuma música pausada!")
 
 @bot.command()
 async def skip(ctx):
-    if ctx.voice_client and ctx.voice_client.is_playing():
+    if ctx.voice_client.is_playing():
         ctx.voice_client.stop()
-        await ctx.send("Música pulada!")
+        await ctx.send("⏭️ Música pulada!")
     else:
-        await ctx.send("Nenhuma música tocando agora.")
+        await ctx.send("❌ Nenhuma música tocando!")
 
 @bot.command()
 async def stop(ctx):
     if ctx.voice_client:
-        ctx.voice_client.stop()
         queues[ctx.guild.id] = []
-        await ctx.send("Música parada e fila limpa!")
-    else:
-        await ctx.send("Não estou tocando nada.")
+        ctx.voice_client.stop()
+        await ctx.voice_client.disconnect()
+        await ctx.send("⏹️ Música parada e fila limpa!")
 
 @bot.command()
-async def ping(ctx):
-    await ctx.send("Pong!")
+async def queue(ctx):
+    guild_id = ctx.guild.id
+    if guild_id in queues and queues[guild_id]:
+        desc = "\n".join([f"{i+1}. {t['title']}" for i, t in enumerate(queues[guild_id])])
+        embed = discord.Embed(
+            title="🎵 Fila de músicas",
+            description=desc,
+            color=discord.Color.blue()
+        )
+        await ctx.send(embed=embed)
+    else:
+        await ctx.send("❌ Fila vazia!")
 
-# ---------------- RODA BOT ----------------
-TOKEN = "SEU_TOKEN_AQUI"
+# ======= Evento pronto =======
+@bot.event
+async def on_ready():
+    print(f"Bot conectado como {bot.user} | Versão {VERSION} | Criador: {AUTHOR}")
+    activity = discord.Game(name=f"🎧 Tocando música | Versão {VERSION}")
+    await bot.change_presence(status=discord.Status.online, activity=activity)
+
+# ======= Run bot =======
 bot.run(TOKEN)

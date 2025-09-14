@@ -1,117 +1,131 @@
-import os
 import discord
 from discord.ext import commands
+import os
 from dotenv import load_dotenv
-import asyncio
 import yt_dlp
-import ffmpeg
-import spotipy
+import asyncio
+from spotipy import Spotify
 from spotipy.oauth2 import SpotifyClientCredentials
 
-# Carrega variáveis do .env
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
-SPOTIPY_CLIENT_ID = os.getenv("SPOTIPY_CLIENT_ID")
-SPOTIPY_CLIENT_SECRET = os.getenv("SPOTIPY_CLIENT_SECRET")
+SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID")
+SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET")
 
-# Configura intents
 intents = discord.Intents.default()
 intents.message_content = True
-intents.guilds = True
-intents.voice_states = True
+intents.voice_states = True  # necessário para tocar música
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# Configura Spotify
-sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials(
-    client_id=SPOTIPY_CLIENT_ID,
-    client_secret=SPOTIPY_CLIENT_SECRET
+# Spotify
+spotify = Spotify(auth_manager=SpotifyClientCredentials(
+    client_id=SPOTIFY_CLIENT_ID,
+    client_secret=SPOTIFY_CLIENT_SECRET
 ))
 
-# Fila de músicas por guilda
-music_queues = {}
+# Fila de reprodução
+queues = {}
 
-# Função para tocar música
-async def play_music(ctx, url):
+ydl_opts = {
+    'format': 'bestaudio/best',
+    'quiet': True,
+    'noplaylist': True,
+    'extract_flat': 'in_playlist'
+}
+
+# --------------------------
+# Eventos
+# --------------------------
+@bot.event
+async def on_ready():
+    print(f"Bot logado como {bot.user}")
+
+@bot.event
+async def on_message(message):
+    if message.author == bot.user:
+        return
+    await bot.process_commands(message)  # IMPORTANTE para comandos funcionarem
+
+# --------------------------
+# Comandos de música
+# --------------------------
+async def play_audio(ctx, url):
     guild_id = ctx.guild.id
-    if guild_id not in music_queues or not music_queues[guild_id]:
-        await ctx.send("Fila de reprodução vazia!")
+    if guild_id not in queues or len(queues[guild_id]) == 0:
+        await ctx.send("Fila vazia!")
         return
 
-    # Pega o próximo item da fila
-    current_url = music_queues[guild_id].pop(0)
+    voice_client = ctx.guild.voice_client
+    if not voice_client or not voice_client.is_connected():
+        if ctx.author.voice:
+            channel = ctx.author.voice.channel
+            voice_client = await channel.connect()
+        else:
+            await ctx.send("Você precisa estar em um canal de voz para tocar música!")
+            return
 
-    # Baixa áudio com yt-dlp
-    ydl_opts = {
-        'format': 'bestaudio/best',
-        'quiet': True,
-        'noplaylist': True,
-        'outtmpl': 'song.%(ext)s',
-    }
-
+    current = queues[guild_id][0]
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(current_url, download=True)
-        filename = ydl.prepare_filename(info)
+        info = ydl.extract_info(current, download=False)
+        url2 = info['url']
 
-    # Toca música no canal de voz
-    voice_client = ctx.voice_client
-    if not voice_client:
-        await ctx.send("Bot não está conectado a um canal de voz!")
-        return
-
-    audio_source = discord.FFmpegPCMAudio(source=filename)
-    voice_client.play(audio_source, after=lambda e: asyncio.run_coroutine_threadsafe(next_song(ctx), bot.loop))
+    voice_client.play(discord.FFmpegPCMAudio(url2, executable="ffmpeg"), after=lambda e: asyncio.run_coroutine_threadsafe(next_song(ctx), bot.loop))
 
 async def next_song(ctx):
     guild_id = ctx.guild.id
-    if guild_id in music_queues and music_queues[guild_id]:
-        await play_music(ctx, music_queues[guild_id][0])
+    queues[guild_id].pop(0)
+    if len(queues[guild_id]) > 0:
+        await play_audio(ctx, queues[guild_id][0])
     else:
-        await ctx.voice_client.disconnect()
+        await ctx.send("Fila finalizada!")
 
-# Comando de entrar no canal
-@bot.command(name="join")
-async def join(ctx):
-    if ctx.author.voice:
-        channel = ctx.author.voice.channel
-        await channel.connect()
-        await ctx.send(f"Conectado ao canal {channel.name}!")
-    else:
-        await ctx.send("Você não está conectado a nenhum canal de voz!")
-
-# Comando de sair do canal
-@bot.command(name="leave")
-async def leave(ctx):
-    if ctx.voice_client:
-        await ctx.voice_client.disconnect()
-        await ctx.send("Desconectado do canal de voz.")
-    else:
-        await ctx.send("O bot não está conectado a nenhum canal de voz.")
-
-# Comando para adicionar música
-@bot.command(name="play")
+@bot.command()
 async def play(ctx, *, url):
     guild_id = ctx.guild.id
-    if guild_id not in music_queues:
-        music_queues[guild_id] = []
+    if guild_id not in queues:
+        queues[guild_id] = []
 
-    music_queues[guild_id].append(url)
+    queues[guild_id].append(url)
     await ctx.send(f"Adicionado à fila: {url}")
 
-    # Se o bot não estiver tocando nada, toca a música
-    if not ctx.voice_client.is_playing():
-        await play_music(ctx, url)
+    voice_client = ctx.guild.voice_client
+    if not voice_client or not voice_client.is_playing():
+        await play_audio(ctx, url)
 
-# Evento ready
-@bot.event
-async def on_ready():
-    print(f"Bot conectado como {bot.user}!")
+@bot.command()
+async def skip(ctx):
+    voice_client = ctx.guild.voice_client
+    if voice_client and voice_client.is_playing():
+        voice_client.stop()
+        await ctx.send("Música pulada!")
+    else:
+        await ctx.send("Nenhuma música tocando!")
 
-# Start do bot
-async def main():
-    async with bot:
-        await bot.start(TOKEN)
+@bot.command()
+async def stop(ctx):
+    voice_client = ctx.guild.voice_client
+    if voice_client:
+        queues[ctx.guild.id] = []
+        await voice_client.disconnect()
+        await ctx.send("Música parada e fila limpa!")
+    else:
+        await ctx.send("Nenhuma música tocando!")
 
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
+@bot.command()
+async def queue(ctx):
+    guild_id = ctx.guild.id
+    if guild_id not in queues or len(queues[guild_id]) == 0:
+        await ctx.send("Fila vazia!")
+    else:
+        msg = "\n".join([f"{i+1}. {song}" for i, song in enumerate(queues[guild_id])])
+        await ctx.send(f"Fila atual:\n{msg}")
+
+# --------------------------
+# Comando simples de teste
+# --------------------------
+@bot.command()
+async def ping(ctx):
+    await ctx.send("Pong!")
+
+bot.run(TOKEN)

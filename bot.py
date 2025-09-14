@@ -7,6 +7,7 @@ import asyncio
 import os
 from spotipy import Spotify
 from spotipy.oauth2 import SpotifyOAuth
+import imageio_ffmpeg as ffmpeg  # << Adicionado
 
 # ===== CONFIGURAÇÕES =====
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -36,9 +37,12 @@ ytdl_format_options = {
 }
 ytdl = youtube_dl.YoutubeDL(ytdl_format_options)
 
+# Caminho do FFmpeg fornecido pelo imageio-ffmpeg
+ffmpeg_path = ffmpeg.get_ffmpeg_exe()
 ffmpeg_options = {
     'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
-    'options': '-vn'
+    'options': '-vn',
+    'executable': ffmpeg_path  # << caminho do FFmpeg
 }
 
 # ===== FILA DE MÚSICAS =====

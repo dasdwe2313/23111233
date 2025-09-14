@@ -1,75 +1,57 @@
 import discord
 from discord.ext import commands
-from services.youtube import search_youtube
-from services.spotify import get_track_name
+import yt_dlp
+from spotipy import Spotify
+from spotipy.oauth2 import SpotifyClientCredentials
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# Configura Spotify
+sp_client_id = os.getenv("SPOTIPY_CLIENT_ID")
+sp_client_secret = os.getenv("SPOTIPY_CLIENT_SECRET")
+spotify = Spotify(auth_manager=SpotifyClientCredentials(client_id=sp_client_id,
+                                                        client_secret=sp_client_secret))
 
 class Music(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
     @commands.command(name="play")
-    async def play(self, ctx, *, query):
-        voice_channel = ctx.author.voice.channel
-        if ctx.voice_client is None:
-            await voice_channel.connect()
+    async def play(self, ctx, *, query: str):
+        if not ctx.author.voice:
+            return await ctx.send("❌ Você precisa estar em um canal de voz.")
+
+        channel = ctx.author.voice.channel
+        if not ctx.voice_client:
+            await channel.connect()
+        vc = ctx.voice_client
+
+        # Detecta Spotify link
+        if "open.spotify.com/track/" in query:
+            track_id = query.split("/")[-1].split("?")[0]
+            track_info = spotify.track(track_id)
+            search_query = f"{track_info['name']} {track_info['artists'][0]['name']}"
         else:
-            await ctx.voice_client.move_to(voice_channel)
+            search_query = query
 
-        if "open.spotify.com" in query:
-            query = get_track_name(query) or query
-
-        url = search_youtube(query)
-        if not url:
-            await ctx.send("❌ Música não encontrada.")
-            return
-
-        ctx.voice_client.stop()
-        ydl_opts = {'format': 'bestaudio'}
-        import yt_dlp
+        # yt-dlp procura no YouTube
+        ydl_opts = {"format": "bestaudio/best", "noplaylist": True, "quiet": True}
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            audio_url = info['url']
+            if "youtube.com" in search_query or "youtu.be" in search_query:
+                info = ydl.extract_info(search_query, download=False)
+            else:
+                info = ydl.extract_info(f"ytsearch:{search_query}", download=False)["entries"][0]
 
-        source = await discord.FFmpegOpusAudio.from_probe(audio_url)
-        ctx.voice_client.play(source)
-        await ctx.send(f"🎵 Tocando: {url}")
+            audio_url = info["formats"][0]["url"]
+            title = info["title"]
 
-    @commands.command(name="pause")
-    async def pause(self, ctx):
-        if ctx.voice_client and ctx.voice_client.is_playing():
-            ctx.voice_client.pause()
-            await ctx.send("⏸️ Música pausada.")
-        else:
-            await ctx.send("⚠️ Nenhuma música tocando.")
-
-    @commands.command(name="resume")
-    async def resume(self, ctx):
-        if ctx.voice_client and ctx.voice_client.is_paused():
-            ctx.voice_client.resume()
-            await ctx.send("▶️ Música retomada.")
-        else:
-            await ctx.send("⚠️ Nenhuma música pausada.")
-
-    @commands.command(name="stop")
-    async def stop(self, ctx):
-        await ctx.voice_client.disconnect()
-        await ctx.send("⏹️ Música parada e bot desconectado.")
-
-    @commands.command(name="menu")
-    async def menu(self, ctx):
-        embed = discord.Embed(
-            title="🎶 Menu de Comandos - Bot de Música",
-            description="Bot com suporte a YouTube e Spotify",
-            color=discord.Color.blue()
-        )
-        embed.add_field(name="📀 !play [nome ou link]", value="Toca uma música via YouTube ou Spotify", inline=False)
-        embed.add_field(name="⏸️ !pause", value="Pausa a música atual", inline=False)
-        embed.add_field(name="▶️ !resume", value="Continua a música pausada", inline=False)
-        embed.add_field(name="🛑 !stop", value="Para tudo e sai do canal de voz", inline=False)
-        embed.add_field(name="ℹ️ !menu", value="Exibe esse menu de ajuda", inline=False)
-        embed.set_footer(text="🔧 Desenvolvido por Kennedy | Versão 1.0")
-        await ctx.send(embed=embed)
+        # Toca o áudio
+        ffmpeg_opts = {"before_options": "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
+                       "options": "-vn"}
+        vc.play(discord.FFmpegPCMAudio(audio_url, **ffmpeg_opts))
+        await ctx.send(f"🎶 Tocando: {title}")
 
 async def setup(bot):
     await bot.add_cog(Music(bot))
-

@@ -7,7 +7,6 @@ import asyncio
 import os
 from spotipy import Spotify
 from spotipy.oauth2 import SpotifyOAuth
-import imageio_ffmpeg as ffmpeg  # << Adicionado
 
 # ===== CONFIGURAÇÕES =====
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -16,7 +15,7 @@ SPOTIPY_CLIENT_ID = os.getenv("SPOTIPY_CLIENT_ID")
 SPOTIPY_CLIENT_SECRET = os.getenv("SPOTIPY_CLIENT_SECRET")
 SPOTIPY_REDIRECT_URI = os.getenv("SPOTIPY_REDIRECT_URI")
 
-# Spotify
+# ===== SPOTIFY =====
 sp = Spotify(auth_manager=SpotifyOAuth(
     client_id=SPOTIPY_CLIENT_ID,
     client_secret=SPOTIPY_CLIENT_SECRET,
@@ -24,7 +23,7 @@ sp = Spotify(auth_manager=SpotifyOAuth(
     scope="user-read-playback-state,user-modify-playback-state"
 ))
 
-# Bot
+# ===== BOT =====
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix=PREFIX, intents=intents)
 
@@ -37,12 +36,9 @@ ytdl_format_options = {
 }
 ytdl = youtube_dl.YoutubeDL(ytdl_format_options)
 
-# Caminho do FFmpeg fornecido pelo imageio-ffmpeg
-ffmpeg_path = ffmpeg.get_ffmpeg_exe()
 ffmpeg_options = {
     'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
-    'options': '-vn',
-    'executable': ffmpeg_path  # << caminho do FFmpeg
+    'options': '-vn -loglevel info'
 }
 
 # ===== FILA DE MÚSICAS =====
@@ -50,11 +46,18 @@ queues = {}
 
 # ===== FUNÇÕES =====
 async def play_next(ctx):
-    if queues[ctx.guild.id]:
-        url = queues[ctx.guild.id].pop(0)
+    if queues.get(ctx.guild.id):
+        next_url = queues[ctx.guild.id].pop(0)
         voice = discord.utils.get(bot.voice_clients, guild=ctx.guild)
-        source = FFmpegPCMAudio(url, **ffmpeg_options)
-        voice.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(play_next(ctx), bot.loop))
+        try:
+            source = FFmpegPCMAudio(
+                next_url,
+                executable="/usr/bin/ffmpeg",  # ajuste se FFmpeg estiver em outro path
+                **ffmpeg_options
+            )
+            voice.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(play_next(ctx), bot.loop))
+        except Exception as e:
+            await ctx.send(f"❌ Erro ao tocar música: {e}")
     else:
         await ctx.send("🎵 **Fila finalizada!**")
 
@@ -86,8 +89,7 @@ async def play(ctx, *, query=None):
     voice = discord.utils.get(bot.voice_clients, guild=ctx.guild)
     if not voice:
         if ctx.author.voice:
-            await ctx.author.voice.channel.connect()
-            voice = discord.utils.get(bot.voice_clients, guild=ctx.guild)
+            voice = await ctx.author.voice.channel.connect()
         else:
             await ctx.send("❌ Você precisa estar em um canal de voz.")
             return
@@ -96,16 +98,16 @@ async def play(ctx, *, query=None):
     try:
         info = ytdl.extract_info(f"ytsearch:{query}", download=False)['entries'][0]
         url = info['url']
-    except Exception:
-        await ctx.send("❌ Não consegui encontrar a música.")
+        title = info.get('title', 'Música desconhecida')
+    except Exception as e:
+        await ctx.send(f"❌ Não consegui encontrar a música. Erro: {e}")
         return
 
-    # Adicionar à fila
+    # Inicializa fila se necessário
     if ctx.guild.id not in queues:
         queues[ctx.guild.id] = []
     queues[ctx.guild.id].append(url)
-
-    await ctx.send(f"🎶 **Adicionado à fila:** {info['title']}")
+    await ctx.send(f"🎶 **Adicionado à fila:** {title}")
 
     # Tocar se nada estiver tocando
     if not voice.is_playing():
@@ -157,7 +159,7 @@ async def on_ready():
     for guild in bot.guilds:
         if guild.id not in queues:
             queues[guild.id] = []
-    print("🎵 Bot pronto! Kennedy Bot v1.1")
+    print("🎵 Bot pronto! Kennedy Bot v2.0")
 
 # ===== RODAR BOT =====
 bot.run(TOKEN)

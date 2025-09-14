@@ -3,7 +3,7 @@ from discord.ext import commands
 from dotenv import load_dotenv
 
 load_dotenv()
-TOKEN = os.getenv("DISCORD_TOKEN")
+TOKEN = os.getenv("OTA0MDY2MTc2MDk3ODQ5NDM0.GnBXYm.UesJD5wHakobg8d3howHMuO09lOOaT9F-4JfkQ")
 bot = commands.Bot(command_prefix="!", intents=commands.Intents.all())
 
 @bot.event

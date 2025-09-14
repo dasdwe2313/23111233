@@ -1,25 +1,28 @@
-# ===== Base =====
+# ===== Dockerfile =====
 FROM python:3.11-slim
 
 # ===== Variáveis de ambiente =====
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
+ENV PYTHONUNBUFFERED=1 \
+    DISCORD_TOKEN="" \
+    SPOTIPY_CLIENT_ID="" \
+    SPOTIPY_CLIENT_SECRET="" \
+    SPOTIPY_REDIRECT_URI=""
 
-# ===== Diretório de trabalho =====
+# ===== Atualizar e instalar dependências =====
+RUN apt-get update && \
+    apt-get install -y ffmpeg curl git && \
+    apt-get clean
+
+# ===== Diretório do app =====
 WORKDIR /app
 
-# ===== Instalar dependências do sistema =====
-RUN apt-get update && apt-get install -y \
-    ffmpeg \
-    git \
-    && rm -rf /var/lib/apt/lists/*
-
 # ===== Copiar arquivos =====
-COPY . /app
+COPY requirements.txt .
+COPY bot.py .
 
-# ===== Atualizar pip e instalar dependências Python =====
+# ===== Instalar pacotes Python =====
 RUN pip install --upgrade pip
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install -r requirements.txt
 
 # ===== Comando para rodar o bot =====
 CMD ["python", "bot.py"]

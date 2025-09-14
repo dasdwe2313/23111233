@@ -46,20 +46,54 @@ queues = {}
 
 # ===== FUNÇÕES =====
 async def play_next(ctx):
-    if queues.get(ctx.guild.id):
-        next_url = queues[ctx.guild.id].pop(0)
-        voice = discord.utils.get(bot.voice_clients, guild=ctx.guild)
-        try:
+    try:
+        if queues.get(ctx.guild.id):
+            next_url = queues[ctx.guild.id].pop(0)
+            voice = discord.utils.get(bot.voice_clients, guild=ctx.guild)
+
+            # Reconnect automático
+            if not voice or not voice.is_connected():
+                if ctx.author.voice:
+                    voice = await ctx.author.voice.channel.connect()
+                else:
+                    await ctx.send("❌ Preciso reconectar, mas você não está em um canal de voz.")
+                    return
+
             source = FFmpegPCMAudio(
                 next_url,
                 executable="/usr/bin/ffmpeg",  # ajuste se FFmpeg estiver em outro path
                 **ffmpeg_options
             )
-            voice.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(play_next(ctx), bot.loop))
-        except Exception as e:
-            await ctx.send(f"❌ Erro ao tocar música: {e}")
-    else:
-        await ctx.send("🎵 **Fila finalizada!**")
+
+            def after_playing(error):
+                coro = play_next(ctx)
+                fut = asyncio.run_coroutine_threadsafe(coro, bot.loop)
+                try:
+                    fut.result()
+                except Exception as e:
+                    print(f"Erro no after_playing: {e}")
+
+            voice.play(source, after=after_playing)
+        else:
+            await ctx.send("🎵 **Fila finalizada!**")
+    except Exception as e:
+        await ctx.send(f"❌ Ocorreu um erro na reprodução: {e}")
+        print(f"[play_next error] {e}")
+
+# ===== MENU =====
+@bot.command()
+async def menu(ctx):
+    menu_text = (
+        "🎵 **Comandos do Kennedy Bot v2.0** 🎵\n"
+        "`!join` - Conectar ao canal de voz\n"
+        "`!leave` - Desconectar do canal de voz\n"
+        "`!play <música ou link>` - Tocar música\n"
+        "`!pause` - Pausar música\n"
+        "`!resume` - Retomar música pausada\n"
+        "`!skip` - Pular música\n"
+        "`!spotify <nome da música>` - Buscar música no Spotify"
+    )
+    await ctx.send(menu_text)
 
 # ===== COMANDOS =====
 @bot.command()
@@ -94,7 +128,6 @@ async def play(ctx, *, query=None):
             await ctx.send("❌ Você precisa estar em um canal de voz.")
             return
 
-    # Buscar no YouTube
     try:
         info = ytdl.extract_info(f"ytsearch:{query}", download=False)['entries'][0]
         url = info['url']
@@ -103,13 +136,11 @@ async def play(ctx, *, query=None):
         await ctx.send(f"❌ Não consegui encontrar a música. Erro: {e}")
         return
 
-    # Inicializa fila se necessário
     if ctx.guild.id not in queues:
         queues[ctx.guild.id] = []
     queues[ctx.guild.id].append(url)
     await ctx.send(f"🎶 **Adicionado à fila:** {title}")
 
-    # Tocar se nada estiver tocando
     if not voice.is_playing():
         await play_next(ctx)
 

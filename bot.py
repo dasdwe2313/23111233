@@ -1,8 +1,11 @@
 import os
 import discord
 from discord.ext import commands
+from dotenv import load_dotenv  # opcional, útil para testes locais
 
-TOKEN = os.getenv("3Ch_x_kjwhG5Z4CpRAck2UDNXHvpBbi1")
+load_dotenv()  # carrega variáveis de .env se estiver rodando localmente
+
+TOKEN = os.getenv("DISCORD_TOKEN")  # <- aqui está o nome correto da variável!
 
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents)

@@ -9,6 +9,7 @@ load_dotenv()  # carrega variáveis do arquivo .env se existir
 TOKEN = os.getenv("DISCORD_TOKEN")
 
 intents = discord.Intents.all()
+intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 @bot.event

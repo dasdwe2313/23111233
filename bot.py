@@ -1,4 +1,4 @@
-# bot.py
+# ===== bot.py atualizado =====
 import discord
 from discord.ext import commands
 from discord import FFmpegPCMAudio
@@ -27,31 +27,17 @@ sp = Spotify(auth_manager=SpotifyOAuth(
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix=PREFIX, intents=intents)
 
-# ===== YTDLP CONFIG =====
-ytdl_format_options = {
-    'format': 'bestaudio/best',
-    'noplaylist': True,
-    'quiet': True,
-    'extract_flat': 'in_playlist',
-}
-ytdl = youtube_dl.YoutubeDL(ytdl_format_options)
-
-ffmpeg_options = {
-    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
-    'options': '-vn -loglevel info'
-}
-
 # ===== FILA DE MÚSICAS =====
 queues = {}
 
-# ===== FUNÇÃO PLAY NEXT =====
+# ===== FUNÇÃO play_next corrigida =====
 async def play_next(ctx):
     try:
         if queues.get(ctx.guild.id):
-            next_query = queues[ctx.guild.id].pop(0)
+            next_url = queues[ctx.guild.id].pop(0)
             voice = discord.utils.get(bot.voice_clients, guild=ctx.guild)
 
-            # Reconectar se necessário
+            # Reconectar automaticamente
             if not voice or not voice.is_connected():
                 if ctx.author.voice:
                     voice = await ctx.author.voice.channel.connect()
@@ -59,25 +45,30 @@ async def play_next(ctx):
                     await ctx.send("❌ Preciso reconectar, mas você não está em um canal de voz.")
                     return
 
-            # Extrair stream direto do YouTube
-            info = ytdl.extract_info(next_query, download=False)
-            stream_url = info['url']
+            # Extrair URL de áudio do YouTube
+            ytdl_format_options = {'format': 'bestaudio/best', 'quiet': True, 'extract_flat': 'in_playlist'}
+            ytdl = youtube_dl.YoutubeDL(ytdl_format_options)
+            try:
+                info = ytdl.extract_info(next_url, download=False)
+                audio_url = info['url']
+            except Exception as e:
+                await ctx.send(f"❌ Erro ao processar a música: {e}")
+                return
 
-            source = FFmpegPCMAudio(
-                stream_url,
-                executable="/usr/bin/ffmpeg",  # ajuste se FFmpeg estiver em outro path
-                **ffmpeg_options
-            )
+            # Criar source do FFmpeg
+            ffmpeg_options = {'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn'}
+            source = FFmpegPCMAudio(audio_url, executable="/usr/bin/ffmpeg", **ffmpeg_options)
 
+            # Função after para tocar a próxima música
             def after_playing(error):
                 if error:
-                    print(f"[play_next after error] {error}")
+                    print(f"[play_next error] {error}")
                 coro = play_next(ctx)
                 fut = asyncio.run_coroutine_threadsafe(coro, bot.loop)
                 try:
                     fut.result()
                 except Exception as e:
-                    print(f"[play_next after_playing fut error] {e}")
+                    print(f"[after_playing fut error] {e}")
 
             voice.play(source, after=after_playing)
         else:
@@ -134,13 +125,12 @@ async def play(ctx, *, query=None):
             await ctx.send("❌ Você precisa estar em um canal de voz.")
             return
 
+    # Buscar no YouTube
+    ytdl_format_options = {'format': 'bestaudio/best', 'quiet': True, 'extract_flat': 'in_playlist'}
+    ytdl = youtube_dl.YoutubeDL(ytdl_format_options)
     try:
-        if not query.startswith("http"):
-            info = ytdl.extract_info(f"ytsearch:{query}", download=False)['entries'][0]
-        else:
-            info = ytdl.extract_info(query, download=False)
-
-        url = info['webpage_url']
+        info = ytdl.extract_info(f"ytsearch:{query}", download=False)['entries'][0]
+        url = info['url']
         title = info.get('title', 'Música desconhecida')
     except Exception as e:
         await ctx.send(f"❌ Não consegui encontrar a música. Erro: {e}")

@@ -1,130 +1,170 @@
+# bot.py
 import discord
 from discord.ext import commands
 import asyncio
 import yt_dlp
-from spotipy import Spotify
+import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
 import os
 from dotenv import load_dotenv
 
-# Carrega variáveis de ambiente
+# ================================
+# Configurações iniciais
+# ================================
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID")
 SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET")
 
-# Intents
 intents = discord.Intents.default()
 intents.message_content = True
+intents.voice_states = True
+bot = commands.Bot(command_prefix="!", intents=intents)
 
-bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
+# Créditos
+BOT_AUTHOR = "Kennedy"
+BOT_VERSION = "1.1"
 
-# Spotify
-spotify = Spotify(auth_manager=SpotifyClientCredentials(
+# ================================
+# Spotify API
+# ================================
+sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials(
     client_id=SPOTIFY_CLIENT_ID,
     client_secret=SPOTIFY_CLIENT_SECRET
 ))
 
-# Fila de música
-music_queue = {}
-
-# YTDL Options
-ytdl_format_options = {
+# ================================
+# YTDL / FFmpeg Config
+# ================================
+ytdl_opts = {
     'format': 'bestaudio/best',
     'noplaylist': True,
     'quiet': True,
-    'default_search': 'ytsearch',
+    'ignoreerrors': True,
+    'default_search': 'auto',
 }
-
-ffmpeg_options = {
+ffmpeg_opts = {
     'options': '-vn'
 }
+ytdl = yt_dlp.YoutubeDL(ytdl_opts)
 
-ytdl = yt_dlp.YoutubeDL(ytdl_format_options)
+# ================================
+# Fila de músicas
+# ================================
+music_queues = {}
 
-# Função de tocar música
+# ================================
+# Função de reprodução
+# ================================
 async def play_next(ctx):
-    if not music_queue[ctx.guild.id]:
-        await ctx.send("Fila de música vazia 🎵")
-        return
-    url = music_queue[ctx.guild.id].pop(0)
-    voice_channel = ctx.author.voice.channel
-    if ctx.guild.voice_client is None:
-        await voice_channel.connect()
-    ctx.guild.voice_client.stop()
-    info = ytdl.extract_info(url, download=False)
-    source = discord.FFmpegPCMAudio(info['url'], **ffmpeg_options)
-    ctx.guild.voice_client.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(play_next(ctx), bot.loop))
-    embed = discord.Embed(
-        title="🎶 Tocando agora!",
-        description=f"[{info['title']}]({info['webpage_url']})",
-        color=discord.Color.purple()
-    )
-    embed.set_footer(text="Bot Kennedy v1.1")
-    await ctx.send(embed=embed)
-
-# Comandos
-@bot.command()
-async def play(ctx, *, query):
-    """Toca uma música do YouTube ou Spotify pelo nome."""
-    if ctx.author.voice is None:
-        await ctx.send("Você precisa estar em um canal de voz 🎧")
+    guild_id = ctx.guild.id
+    if guild_id not in music_queues or len(music_queues[guild_id]) == 0:
+        await ctx.send("🎵 A fila terminou!")
         return
 
-    # Busca no Spotify
-    if "open.spotify.com" in query:
-        try:
-            track_id = query.split("/")[-1].split("?")[0]
-            track = spotify.track(track_id)
-            query = f"{track['name']} {track['artists'][0]['name']}"
-        except:
-            await ctx.send("Erro ao buscar música no Spotify ❌")
+    # Pega a próxima música
+    song = music_queues[guild_id].pop(0)
+
+    # Conecta no canal de voz se não estiver conectado
+    if ctx.voice_client is None:
+        if ctx.author.voice:
+            await ctx.author.voice.channel.connect()
+        else:
+            await ctx.send("Você precisa estar em um canal de voz para reproduzir músicas!")
             return
 
-    info = ytdl.extract_info(f"ytsearch:{query}", download=False)['entries'][0]
-    url = info['webpage_url']
+    # Toca a música
+    ctx.voice_client.stop()
+    ctx.voice_client.play(
+        discord.FFmpegPCMAudio(song['url'], **ffmpeg_opts),
+        after=lambda e: asyncio.run_coroutine_threadsafe(play_next(ctx), bot.loop)
+    )
+    await ctx.send(f"▶️ Tocando agora: **{song['title']}**")
 
-    if ctx.guild.id not in music_queue:
-        music_queue[ctx.guild.id] = []
-    music_queue[ctx.guild.id].append(url)
+# ================================
+# Comando play
+# ================================
+@bot.command()
+async def play(ctx, *, query: str):
+    guild_id = ctx.guild.id
+    if guild_id not in music_queues:
+        music_queues[guild_id] = []
 
-    await ctx.send(f"✅ Adicionado à fila: **{info['title']}**")
+    # Busca música
+    try:
+        if query.startswith("spotify:track:") or "open.spotify.com/track" in query:
+            # Spotify
+            results = sp.track(query)
+            search_query = f"{results['name']} {results['artists'][0]['name']}"
+        else:
+            # YouTube
+            search_query = query
 
-    if not ctx.guild.voice_client or not ctx.guild.voice_client.is_playing():
-        await play_next(ctx)
+        info = ytdl.extract_info(f"ytsearch:{search_query}", download=False)['entries'][0]
+        music_queues[guild_id].append({
+            'title': info['title'],
+            'url': info['url']
+        })
 
+        await ctx.send(f"✅ Música adicionada à fila: **{info['title']}**")
+
+        # Se não estiver tocando, inicia
+        if not ctx.voice_client or not ctx.voice_client.is_playing():
+            await play_next(ctx)
+    except Exception as e:
+        await ctx.send(f"❌ Erro ao buscar música: {e}")
+
+# ================================
+# Comando skip
+# ================================
 @bot.command()
 async def skip(ctx):
-    """Pula a música atual"""
-    if ctx.guild.voice_client and ctx.guild.voice_client.is_playing():
-        ctx.guild.voice_client.stop()
+    if ctx.voice_client and ctx.voice_client.is_playing():
+        ctx.voice_client.stop()
         await ctx.send("⏭ Música pulada!")
     else:
-        await ctx.send("Não há música tocando 🎶")
+        await ctx.send("❌ Nenhuma música está tocando.")
 
+# ================================
+# Comando stop
+# ================================
 @bot.command()
 async def stop(ctx):
-    """Para a música e limpa a fila"""
-    if ctx.guild.voice_client:
-        ctx.guild.voice_client.stop()
-        music_queue[ctx.guild.id] = []
-        await ctx.guild.voice_client.disconnect()
-        await ctx.send("⏹ Música parada e fila limpa!")
+    if ctx.voice_client:
+        await ctx.voice_client.disconnect()
+        await ctx.send("⏹ Parando todas as músicas e saindo do canal!")
+        music_queues[ctx.guild.id] = []
     else:
-        await ctx.send("Não há música tocando 🎶")
+        await ctx.send("❌ Não estou conectado em nenhum canal de voz.")
 
+# ================================
+# Comando queue
+# ================================
 @bot.command()
 async def queue(ctx):
-    """Mostra a fila de músicas"""
-    if ctx.guild.id not in music_queue or not music_queue[ctx.guild.id]:
-        await ctx.send("Fila vazia 🎵")
-        return
-    desc = "\n".join([f"{i+1}. {ytdl.extract_info(url, download=False)['title']}" for i, url in enumerate(music_queue[ctx.guild.id])])
-    embed = discord.Embed(title="🎶 Fila de músicas", description=desc, color=discord.Color.green())
-    await ctx.send(embed=embed)
+    guild_id = ctx.guild.id
+    if guild_id not in music_queues or len(music_queues[guild_id]) == 0:
+        await ctx.send("🎵 A fila está vazia!")
+    else:
+        queue_list = "\n".join([f"{i+1}. {song['title']}" for i, song in enumerate(music_queues[guild_id])])
+        await ctx.send(f"🎶 Fila de músicas:\n{queue_list}")
 
+# ================================
+# Comando créditos
+# ================================
+@bot.command()
+async def credits(ctx):
+    await ctx.send(f"🤖 Bot versão {BOT_VERSION} desenvolvido por {BOT_AUTHOR}")
+
+# ================================
+# Evento ready
+# ================================
 @bot.event
 async def on_ready():
-    print(f"{bot.user} está online!")
+    print(f"{bot.user} conectado!")
+    print(f"Versão {BOT_VERSION} | Autor: {BOT_AUTHOR}")
 
+# ================================
+# Run bot
+# ================================
 bot.run(TOKEN)

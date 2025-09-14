@@ -44,14 +44,14 @@ ffmpeg_options = {
 # ===== FILA DE MÚSICAS =====
 queues = {}
 
-# ===== FUNÇÕES =====
+# ===== FUNÇÃO PLAY NEXT =====
 async def play_next(ctx):
     try:
         if queues.get(ctx.guild.id):
-            next_url = queues[ctx.guild.id].pop(0)
+            next_query = queues[ctx.guild.id].pop(0)
             voice = discord.utils.get(bot.voice_clients, guild=ctx.guild)
 
-            # Reconnect automático
+            # Reconectar se necessário
             if not voice or not voice.is_connected():
                 if ctx.author.voice:
                     voice = await ctx.author.voice.channel.connect()
@@ -59,19 +59,25 @@ async def play_next(ctx):
                     await ctx.send("❌ Preciso reconectar, mas você não está em um canal de voz.")
                     return
 
+            # Extrair stream direto do YouTube
+            info = ytdl.extract_info(next_query, download=False)
+            stream_url = info['url']
+
             source = FFmpegPCMAudio(
-                next_url,
+                stream_url,
                 executable="/usr/bin/ffmpeg",  # ajuste se FFmpeg estiver em outro path
                 **ffmpeg_options
             )
 
             def after_playing(error):
+                if error:
+                    print(f"[play_next after error] {error}")
                 coro = play_next(ctx)
                 fut = asyncio.run_coroutine_threadsafe(coro, bot.loop)
                 try:
                     fut.result()
                 except Exception as e:
-                    print(f"Erro no after_playing: {e}")
+                    print(f"[play_next after_playing fut error] {e}")
 
             voice.play(source, after=after_playing)
         else:
@@ -129,8 +135,12 @@ async def play(ctx, *, query=None):
             return
 
     try:
-        info = ytdl.extract_info(f"ytsearch:{query}", download=False)['entries'][0]
-        url = info['url']
+        if not query.startswith("http"):
+            info = ytdl.extract_info(f"ytsearch:{query}", download=False)['entries'][0]
+        else:
+            info = ytdl.extract_info(query, download=False)
+
+        url = info['webpage_url']
         title = info.get('title', 'Música desconhecida')
     except Exception as e:
         await ctx.send(f"❌ Não consegui encontrar a música. Erro: {e}")

@@ -1,18 +1,18 @@
-# Discord
+# Discord.py para bots
 discord.py==2.6.3
 
-# Para tocar áudio
-yt-dlp==2025.09.06
+# Reprodutor de áudio (YouTube, links diretos)
+yt-dlp==2024.12.30
 FFmpeg-python==0.3.0
 
-# Spotify
+# API Spotify
 spotipy==2.27.0
 
-# Carregar variáveis de ambiente
+# Variáveis de ambiente (.env)
 python-dotenv==1.0.1
 
-# Requests HTTP (geralmente já vem com Python, mas adicionado para compatibilidade)
+# Requisições HTTP (compatível com Python 3.13)
 requests==2.32.0
 
-# Async HTTP (usado pelo discord.py)
+# Async HTTP usado pelo discord.py
 aiohttp==3.9.4

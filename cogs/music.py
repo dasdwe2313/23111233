@@ -70,5 +70,6 @@ class Music(commands.Cog):
         embed.set_footer(text="🔧 Desenvolvido por Kennedy | Versão 1.0")
         await ctx.send(embed=embed)
 
-def setup(bot):
-    bot.add_cog(Music(bot))
+async def setup(bot):
+    await bot.add_cog(Music(bot))
+

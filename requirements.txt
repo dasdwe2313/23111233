@@ -2,8 +2,10 @@
 discord.py==2.6.3
 
 # Reprodutor de áudio (YouTube, links diretos)
-yt-dlp==2025.9.13
-FFmpeg-python==0.3.0
+yt-dlp==2024.12.6
+
+# FFmpeg para Python
+ffmpeg-python==0.3.1
 
 # API Spotify
 spotipy==2.27.0
